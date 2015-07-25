@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8' />
+    <title>Where the Renters Are: Dot Density</title>
+    <meta name="description" content="A dot density map of where people rent vs own in the United States" />
+    <meta property="og:title" content="Where the Renters Are" />
+    <meta property="og:type" content="article" />
+    <meta property="og:url" content="http://schwanksta.com/maps/where-the-renters-are-dots" />
+    <meta property="og:image" content="http://schwanksta.com/media/renter-dots-shareimg.png" />
+    <meta property="og:description" content="A dot density map of where people rent vs own in the United States" />
+    <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no' />
+    <script src='https://api.tiles.mapbox.com/mapbox-gl-js/v0.8.1/mapbox-gl.js'></script>
+    <script src="https://code.jquery.com/jquery-2.1.4.min.js"></script>
+    <script src='https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.8.3/underscore-min.js'></script>
+    <link href='https://api.tiles.mapbox.com/mapbox-gl-js/v0.8.1/mapbox-gl.css' rel='stylesheet' />
+    <style>
+        body { margin:0; padding:0; }
+        #map { position:absolute; top:0; bottom:0; width:100%; }
+        ul { list-style-type: none; padding: 0px 0px 0px 30px; }
+        #flag { z-index: 999999; background: black; color: white; min-width:100px; min-height: 50px; position: absolute;}
+        .swatch {
+            width: 10px;
+            height: 10px;
+            float: left;
+            margin-top: 17px;
+            border-radius: 50%;
+        }
+        .owner { background-color: #045a8d }
+        .renter { background-color: #bc3939 }
+        .even { background-color: #874e8e }
+        .desc {  float: left; padding: 0px 8px 0px 3px; margin-top:17px;}
+        #topstrip { z-index: 9999999; background: rgba(255,255,255,0.7); position: absolute; padding: 10px; top:0px; left:0px; height: 30px; font-family: Helvetica, Arial, sans-serif; font-size:12px;}
+        #topstrip .big { float: left; width: 320px; padding:0px; font-size: 2.5em; font-weight: bold;}
+        #me { float:left; padding:2px; margin-top:15px }
+        #tilt { float:left; padding:2px; margin-top:15px }
+        @media only screen and (max-device-width: 667px) {
+           .owner { clear: left }
+           #topstrip { height: 60px } 
+        }
+    </style>
+</head>
+<body>
+
+<div id="topstrip">
+ <span class="big">Where the renters are</span>
+ <div class="swatch owner"></div>  <span class="desc"> 25 Owner-occupied</span> 
+ <div class="swatch renter"></div> <span class="desc"> 25 Renter-occupied</span>
+ <button id="me">me</button>
+ <button id="tilt">tilt</button>
+</div>
+<div id='map'>
+
+</div>
+<script>
+
+var ranks = [1,2,3,4,5];
+
+// Slightly altered from mapbox's basic-v7.json
+var topLayers =[
+    {
+      "id": "water",
+      "type": "fill",
+      "source": "mapbox",
+      "source-layer": "water",
+      "layout": {
+        "visibility": "visible"
+      },
+      "paint": {
+        "fill-color": "#fff"
+      }
+    },
+    {
+      "id": "road_major",
+      "type": "line",
+      "source": "mapbox",
+      "source-layer": "road",
+      "filter": [
+        "all",
+        [
+          "==",
+          "$type",
+          "LineString"
+        ],
+        [
+          "in",
+          "class",
+          "motorway",
+          "main"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "@road-major",
+        "line-width": "@road-major-width"
+      }
+    },
+    {
+      "id": "road_major_label",
+      "type": "symbol",
+      "source": "mapbox",
+      "source-layer": "road_label",
+      "filter": [
+        "all",
+        [
+          "in",
+          "class",
+          "motorway",
+          "main"
+        ],
+        [
+          "==",
+          "$type",
+          "LineString"
+        ]
+      ],
+      "layout": {
+        "symbol-placement": "line",
+        "text-field": "@name",
+        "text-font": "@sans_md",
+        "text-transform": "uppercase",
+        "text-letter-spacing": 0.1,
+        "text-max-size": 14
+      },
+      "paint": {
+        "text-color": "@label",
+        "text-halo-color": "@label-halo",
+        "text-halo-width": 2,
+        "text-size": {
+          "base": 1.4,
+          "stops": [
+            [
+              10,
+              8
+            ],
+            [
+              20,
+              14
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "place_label_city",
+      "type": "symbol",
+      "source": "mapbox",
+      "source-layer": "place_label",
+      "maxzoom": 16,
+      "filter": [
+        "all",
+        [
+          "==",
+          "$type",
+          "Point"
+        ],
+        [
+          "==",
+          "type",
+          "city"
+        ]
+      ],
+      "layout": {
+        "text-field": "@name",
+        "text-font": "@sans_bd",
+        "text-max-width": 10
+      },
+      "paint": {
+        "text-color": "@label",
+        "text-halo-color": "@label-halo",
+        "text-halo-width": 1.2,
+        "text-halo-blur": 0.5,
+        "text-size": {
+      "stops": [
+        [
+          3,
+          12
+        ],
+        [
+          8,
+          16
+        ]
+      ]
+    }
+  }
+}];
+
+var style = {
+      "version": 7,
+      "sprite": "https://www.mapbox.com/mapbox-gl-styles/sprites/mapbox-streets",
+      "glyphs": "mapbox://fontstack/{fontstack}/{range}.pbf",
+      "constants": {
+        "@5": "#f1eef6",
+        "@4": "#bdc9e1",
+        "@3": "#74a9cf",
+        "@2": "#2b8cbe",
+        "@1": "#045a8d",
+        "@mostly-owners": "#045a8d",
+        "@mostly-renters": "#bc3939",
+        "@about-even": "#874e8e",
+        "@name": "{name_en}",
+        "@sans": "Open Sans Regular, Arial Unicode MS Regular",
+        "@sans_md": "Open Sans Semibold, Arial Unicode MS Bold",
+        "@sans_bd": "Open Sans Bold, Arial Unicode MS Bold",
+        "@land": "#f4f4f4",
+        "@water": "#a0cfdf",
+        "@park": "#d2edae",
+        "@building": "#d6d6d6",
+        "@label": "#454545",
+        "@label-halo": "rgba(255,255,255,1)",
+        "@road-major": {
+            "stops": [[5, "#eee"], [10, "hsla(0, 0%, 40%, 0.65)"]]
+        },
+        "@road-minor": "#efefef",
+        "@road-major-width": {
+          "base": 1.4,
+          "stops": [
+            [6, 0.5],[20,30]
+          ]
+        },
+        "@road-minor-width": {
+          "base": 1.55,
+          "stops": [
+            [4, 0.25], [20,30]
+          ]
+        }
+      },
+      "sources": {
+        "renters": {
+          "type": "vector",
+          "tiles": [
+            //"http://127.0.0.1:8080/{z}/{x}/{y}.pbf"
+            "http://tiles.schwanksta.com/vt/renters-dots/{z}/{x}/{y}.pbf",
+            "http://tiles2.schwanksta.com/vt/renters-dots/{z}/{x}/{y}.pbf",
+            "http://tiles3.schwanksta.com/vt/renters-dots/{z}/{x}/{y}.pbf",
+            "http://tiles4.schwanksta.com/vt/renters-dots/{z}/{x}/{y}.pbf"
+          ],
+          "minzoom": 3,
+          "maxzoom": 14,
+          "attribution": "<a href='http://twitter.com/schwanksta'>Ken Schwencke</a>, US Census"
+        },
+        "mapbox": {
+            "url": "mapbox://mapbox.mapbox-streets-v6",
+            "type": "vector"
+        },
+        "mapbox://mapbox.mapbox-terrain-v2": {
+            "url": "mapbox://mapbox.mapbox-terrain-v2",
+            "type": "vector"
+        },
+      },
+      "layers": [
+        {
+            "id": "background",
+            "type": "background",
+            "paint": {
+                "background-color": "@land"
+            }
+        }]
+    };
+
+
+var dataLayers = [{
+    "id": "owners",
+    "type": "symbol",
+    "source": "renters",
+    "source-layer": "renters",
+    "filter": ["==", "GROUP", "owner"],
+    "layout": {
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+      "icon-image": "circle.sdf"
+    },
+    "paint": {
+        "icon-size": {
+            "base": 1,
+            "stops": [
+                [3, 0.05],  [12, 0.35]
+            ]
+        },
+        "icon-opacity": {
+            "stops": [
+                [3, 0.2], [11, 0.85]
+            ]
+        },
+        "icon-color": "@mostly-owners",
+    }
+},
+{
+    "id": "renters",
+    "type": "symbol",
+    "source": "renters",
+    "source-layer": "renters",
+    "filter": ["==", "GROUP", "renter"],
+    "layout": {
+      "icon-allow-overlap": true,
+      "icon-ignore-placement": true,
+      "icon-image": "circle.sdf"
+    },
+    "paint": {
+        "icon-size": {
+            "base": 1,
+            "stops": [
+                [3, 0.05], [12, 0.35]
+            ]
+        },
+        "icon-opacity": {
+            "stops": [
+                [3, 0.2], [11, 0.85]
+            ]
+        },
+        "icon-color": "@mostly-renters",
+    }
+}]
+
+
+
+
+style.layers = style.layers.concat(dataLayers.concat(topLayers));
+mapboxgl.accessToken = 'pk.eyJ1Ijoic2Nod2Fua3N0YSIsImEiOiIwTXZySHdVIn0.2RSD-PKkyPIboteVeFcZ2g';
+map = new mapboxgl.Map({
+    container: 'map', 
+    style: style,
+    center: [38.73,-97.53], 
+    zoom: 4,
+    minZoom: 4,
+    maxZoom: 11,
+    maxBounds: [[15,-140], [58,-55]],
+    hash: true
+});
+
+$("#me").on('click', function(e) {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(function(pos) {
+            map.flyTo({center: [pos.coords.latitude,pos.coords.longitude], zoom: 12});
+        });
+    } else {
+        alert("Can't find you, sorry");
+    }
+});
+
+var tilted=false;
+$("#tilt").on('click', function(e) {
+    if (!tilted) {
+        map.setPitch(60);
+        tilted=true;
+    } else {
+        map.setPitch(0);
+        tilted=false;
+    }
+});
+
+
+
+</script>
+<!--<div id="flag">Hello</div>-->
+
+	<script type="text/javascript">
+	  var _gaq = _gaq || [];
+	  _gaq.push(['_setAccount', 'UA-3493117-1']);
+	  _gaq.push(['_trackPageview']);
+
+	  (function() {
+	    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+	    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+	    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+	  })();
+
+	</script>
+
+</body>
+</html>
+
+
+
